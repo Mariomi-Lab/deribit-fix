@@ -7,6 +7,7 @@
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 
+#include <quickfix/Dictionary.h>
 #include <quickfix/Session.h>
 #include <quickfix/fix44/ExecutionReport.h>
 #include <quickfix/fix44/MarketDataIncrementalRefresh.h>
@@ -23,8 +24,16 @@
 #include <chrono>
 #include <ctime>
 #include <iostream>
+#include <quickfix/MySQLConnection.h>
 
 namespace FIX {
+
+void persist(FIX44::SecurityList const &);
+//void persist(FIX44::MarketDataSnapshotFullRefresh const &);
+
+// Generic case
+template <typename T>
+void persistUpdate(T const &);
 
 using encoding_t = unsigned char const *;
 
@@ -57,8 +66,10 @@ quickfix::quickfix(config_file_t &configuration, quickfix_user &user)
       m_configuration["FIXConfigurationFile"]);
   m_quickfix_synch = std::make_unique<FIX::SynchronizedApplication>(*this);
   m_quickfix_store_factory =
+//          std::make_unique<FIX::MySQLStoreFactory>(*m_quickfix_settings);
       std::make_unique<FIX::FileStoreFactory>(*m_quickfix_settings);
   m_quickfix_log_factory =
+//      std::make_unique<FIX::MySQLLogFactory>(*m_quickfix_settings);
       std::make_unique<FIX::FileLogFactory>(*m_quickfix_settings);
 
   // Indicate if it will be used for log replay or for real
@@ -144,7 +155,10 @@ void quickfix::fromApp(
     SessionID const &session_id) throw(FieldNotFound, IncorrectDataFormat,
                                        IncorrectTagValue,
                                        UnsupportedMessageType) {
-  crack(message, session_id);
+    const std::string & msgTypeValue
+            = message.getHeader().getField( FIX::FIELD::MsgType );
+
+    crack(message, session_id);
 }
 
 void quickfix::test_request() {
@@ -213,20 +227,37 @@ void quickfix::request_market_data(string const &symbol) {
   message.setField(FIX::Symbol(symbol));
   message.setField(FIX::MDReqID(request_id));
   message.setField(FIX::SubscriptionRequestType(
-      FIX::SubscriptionRequestType_SNAPSHOT_PLUS_UPDATES));
+      FIX::SubscriptionRequestType_SNAPSHOT_AND_UPDATES));
 
   message.setField(FIX::MarketDepth(1));
   message.setField(FIX::MDUpdateType(0));
 
   /** Groups for requesting bid and ask */
-  message.setField(FIX::NoMDEntryTypes(2));
+  message.setField(FIX::NoMDEntryTypes(1));
   FIX44::MarketDataRequest::NoMDEntryTypes entry_types;
-  entry_types.set(FIX::MDEntryType_BID);
-  message.addGroup(entry_types);
-  entry_types.set(FIX::MDEntryType_OFFER);
-  message.addGroup(entry_types);
+//  entry_types.set(FIX::MDEntryType_BID);
+//  message.addGroup(entry_types);
+//  entry_types.set(FIX::MDEntryType_OFFER);
+//  message.addGroup(entry_types);
+    entry_types.set(FIX::MDEntryType_TRADE);
+    message.addGroup(entry_types);
 
   send_message(message, m_session_id);
+}
+
+void quickfix::request_trade_data(string const &symbol) {
+    Message message;
+    auto const request_id = std::to_string(m_request_identifier++);
+
+    auto &header = message.getHeader();
+    header.setField(FIX::MsgType(FIX::MsgType_TradeCaptureReportRequest));
+
+    message.setField(FIX::TradeRequestID(request_id));
+    message.setField(FIX::TradeRequestType(0));
+    message.setField(FIX::Symbol(symbol));
+    message.setField(FIX::SubscriptionRequestType(FIX::SubscriptionRequestType_SNAPSHOT_AND_UPDATES));
+
+    send_message(message, m_session_id);
 }
 
 string quickfix::send_ioc_order(string const &symbol, side_t order_side,
@@ -375,10 +406,18 @@ void quickfix::create_logon_message(Message &message) {
   // Creating password: base64(sha(raw_data+SECRET_KEY))
   string raw_and_secret = raw_data + m_configuration["AccessSecret"];
   unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256_CTX sha256;
-  SHA256_Init(&sha256);
-  SHA256_Update(&sha256, raw_and_secret.c_str(), raw_and_secret.size());
-  SHA256_Final(hash, &sha256);
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    const EVP_MD *md = EVP_sha256();
+
+    EVP_DigestInit_ex(mdctx, md, NULL);
+    EVP_DigestUpdate(mdctx, raw_and_secret.c_str(), raw_and_secret.size());
+    EVP_DigestFinal_ex(mdctx, hash, NULL);
+    EVP_MD_CTX_free(mdctx);
+
+//  SHA256_CTX sha256;
+//  SHA256_Init(&sha256);
+//  SHA256_Update(&sha256, raw_and_secret.c_str(), raw_and_secret.size());
+//  SHA256_Final(hash, &sha256);
   string password = ::Deribit::base64_encode(hash, SHA256_DIGEST_LENGTH);
 
   // Setting message fields
@@ -428,6 +467,7 @@ void quickfix::onMessage(FIX44::PositionReport const &message,
 
 void quickfix::onMessage(FIX44::SecurityList const &message,
                          SessionID const &session_id) {
+
   // Total instruments reported and vector's initialization
   auto const instruments_size =
       field<size_t>::get(message, FIELD::NoRelatedSym);
@@ -458,8 +498,12 @@ void quickfix::onMessage(FIX44::SecurityList const &message,
                                      FIELD::MinPriceIncrement),
     };
 
+    std::cout << "onMessage(FIX44::SecurityList): " << instrument << std::endl;
+
     instruments->push_back(std::move(instrument));
   }
+
+  persist(message);
 
   // Communicate to the user
   m_user.on_message(instruments);
@@ -475,7 +519,7 @@ void quickfix::onMessage(FIX44::MarketDataRequestReject const &message,
 
 void quickfix::onMessage(FIX44::MarketDataSnapshotFullRefresh const &message,
                          SessionID const &session_id) {
-  market_update_t update;
+      market_update_t update;
 
   // Populate the update with the update components
   auto const symbol = field<string>::get(message, FIELD::Symbol);
@@ -495,21 +539,30 @@ void quickfix::onMessage(FIX44::MarketDataSnapshotFullRefresh const &message,
     update.updates.resize(level_depth);
 
     for (size_t index = 0; index < level_depth; ++index) {
-      message.getGroup(index + 1, entries_group);
+      FIX::Group group = message.getGroup(index + 1, entries_group);
 
-      update.updates[index].side =
-          field<market_side_t>::get(entries_group, FIELD::MDEntryType);
+      update.updates[index].type =
+          field<market_type_t>::get(group, FIELD::MDEntryType);
 
       update.updates[index].update_type = market_update_action_t::NEW;
-      update.updates[index].level_price =
-          field<price_t>::get(entries_group, FIELD::MDEntryPx);
+        update.updates[index].side =
+                field<side_t>::get(group, FIELD::Side);
+        update.updates[index].level_price =
+                field<price_t>::get(group, FIELD::MDEntryPx);
       update.updates[index].level_volume =
-          field<volume_t>::get(entries_group, FIELD::MDEntrySize);
+          field<volume_t>::get(group, FIELD::MDEntrySize);
+        update.updates[index].entryDate =
+                field<optional<ptime>>::get(group, FIELD::MDEntryDate);
+
     }
   }
 
   // Communicate to the user
   m_user.on_message(update);
+
+  persistUpdate(message);
+
+  std::cout << "(W): " << update << std::endl;
 }
 
 void quickfix::onMessage(FIX44::MarketDataIncrementalRefresh const &message,
@@ -530,21 +583,29 @@ void quickfix::onMessage(FIX44::MarketDataIncrementalRefresh const &message,
     for (size_t index = 0; index < level_depth; ++index) {
       message.getGroup(index + 1, entries_group);
 
-      update.updates[index].side =
-          field<market_side_t>::get(entries_group, FIELD::MDEntryType);
+      update.updates[index].type =
+          field<market_type_t>::get(entries_group, FIELD::MDEntryType);
 
       update.updates[index].update_type = field<market_update_action_t>::get(
           entries_group, FIELD::MDUpdateAction);
       ;
+        update.updates[index].side =
+                field<side_t>::get(entries_group, FIELD::Side);
       update.updates[index].level_price =
           field<price_t>::get(entries_group, FIELD::MDEntryPx);
       update.updates[index].level_volume =
           field<volume_t>::get(entries_group, FIELD::MDEntrySize);
+        update.updates[index].entryDate =
+                field<optional<ptime>>::get(entries_group, FIELD::MDEntryDate);
     }
   }
 
   // Communicate to the user
   m_user.on_message(update);
+
+  persistUpdate(message);
+
+    std::cout << "(X): " << update << std::endl;
 }
 
 void quickfix::onMessage(FIX44::ExecutionReport const &message,
@@ -630,6 +691,110 @@ void quickfix::send_message(Message &message, SessionID const &session) {
   if (!m_log_replay) {
     FIX::Session::sendToTarget(message, m_session_id);
   }
+}
+
+MySQLConnection* pConnection = new MySQLConnection( "crypto", "root", "", "localhost", 3306 );
+
+void persist(FIX44::SecurityList const &messages) {
+
+    std::stringstream queryString;
+    queryString << "INSERT INTO instruments "
+                << "(Symbol, SecurityDesc, SecurityType, PutOrCall, StrikePrice, StrikeCurrency, Currency, PriceQuoteCurrency, "
+                   "InstrumentPricePrecision, MinPriceIncrement, UnderlyingSymbol, IssueDate, MaturityDate, MaturityTime, "
+                   "MinTradeVol, SettlType, SettlCurrency, CommCurrency, ContractMultiplier, SecurityStatus)"
+                << " VALUES ";
+
+    FIX44::SecurityList::NoRelatedSym group;
+    FIX::NoRelatedSym noSym;
+
+    for (int i = 0; i < messages.get(noSym); i++) {
+        messages.getGroup(i + 1, group);
+        queryString << "('" << field<string>::get(group, FIELD::Symbol) << "', "
+                    << "'" << field<string>::get(group, FIELD::SecurityDesc) << "', "
+                    << "'" << field<string>::get(group, FIELD::SecurityType) << "', "
+                    << to_string(field<optional<int>>::get(group, FIELD::PutOrCall)) << ", "
+                    << to_string(field<optional<price_t>>::get(group, FIELD::StrikePrice)) << ", "
+                    << (group.isSetField(FIELD::StrikeCurrency) ? "'" + field<string>::get(group, FIELD::StrikeCurrency) + "'" : "NULL") <<  ", "
+                    << "'" << field<string>::get(group, FIELD::Currency) << "', "
+                    << "'" << field<string>::get(group, FIELD::PriceQuoteCurrency) << "', "
+                    << field<int>::get(group, FIELD::InstrumentPricePrecision) << ", "
+                    << field<price_t>::get(group, FIELD::MinPriceIncrement) << ", "
+                    << "'" << field<string>::get(group, FIELD::UnderlyingSymbol) << "', "
+                    << "'" << to_string(field<optional<ptime>>::get(group, FIELD::IssueDate)) << "', "
+                    << "'" << to_string(field<optional<ptime>>::get(group, FIELD::MaturityDate)) << "', "
+                    << "'" << to_string(field<optional<ptime>>::get(group, FIELD::MaturityTime)) << "', "
+                    << (group.isSetField(FIELD::MinTradeVol) ? field<volume_t>::get(group, FIELD::MinTradeVol) : NULL) << ", "
+                    << (group.isSetField(FIELD::SettlType) ? "'" + to_string(field<string>::get(group, FIELD::SettlType)) +  "'" : "NULL") << ", "
+                    << (group.isSetField(FIELD::SettlCurrency) ? "'" + to_string(field<string>::get(group, FIELD::SettlCurrency)) + "'" : "NULL") << ", "
+                    << (group.isSetField(FIELD::CommCurrency) ? "'" + to_string(field<string>::get(group, FIELD::CommCurrency)) + "'" : "NULL") << ", "
+                    << (group.isSetField(FIELD::ContractMultiplier) ? field<optional<double>>::get(group, FIELD::ContractMultiplier) : NULL) << ", "
+                    << (group.isSetField(FIELD::SecurityStatus) ? "'" + field<string>::get(group, FIELD::SecurityStatus) + "'" : "NULL")
+                    << ((i == messages.get(noSym) - 1) ? ")" : "), ")
+                    ;
+    }
+
+//    std::cout << queryString.str() << std::endl;
+
+    FIX::MySQLQuery query( queryString.str() );
+    pConnection->execute(query);
+}
+
+template <typename T>
+void persistUpdate(T const &messages) {
+
+    std::stringstream queryString;
+    queryString << "INSERT INTO market_trades "
+                << "(Symbol, MDReqID, UnderlyingSymbol, UnderlyingPx, ContractMultiplier, PutOrCall, TradeVolume24h, "
+                << "MarkPrice, OpenInterest, CurrentFunding, Funding8h, MDEntryType, MDUpdateAction, MDEntryPx, MDEntrySize, "
+                << "MDEntryDate, DeribitTradeId, Side, Price, Text, OrderID, SecondaryOrderID, OrdStatus, DeribitLabel, "
+                << "DeribitLiquidation, TrdMatchID)"
+                << " VALUES ";
+
+    auto const level_depth = field<size_t>::get(messages, FIELD::NoMDEntries);
+    typename T::NoMDEntries group;
+
+    bool go = false;
+
+    for (int i = 0; i < level_depth; i++) {
+        messages.getGroup(i + 1, group);
+        if (*field<optional<market_type_t>>::get(group, FIELD::MDEntryType) != market_type_t::TRADE) continue;
+        go = true;
+        queryString << "('" << field<string>::get(messages, FIELD::Symbol) << "', "
+                    << (messages.isSetField(FIELD::MDReqID) ? "'" + to_string(field<string>::get(messages, FIELD::MDReqID)) +  "'" : "NULL") << ", "
+                    << (messages.isSetField(FIELD::UnderlyingSymbol) ? "'" + to_string(field<string>::get(messages, FIELD::UnderlyingSymbol)) +  "'" : "NULL") << ", "
+                    << (messages.isSetField(FIELD::UnderlyingPx) ? to_string(field<price_t>::get(messages, FIELD::UnderlyingPx)) : "NULL") << ", "
+                    << (messages.isSetField(FIELD::ContractMultiplier) ? to_string(field<price_t>::get(messages, FIELD::ContractMultiplier)) : "NULL") << ", "
+                    << to_string(field<optional<int>>::get(messages, FIELD::PutOrCall)) << ", "
+                    << (messages.isSetField(FIX::TradeVolume24h::tag) ? to_string(field<price_t>::get(messages, FIX::TradeVolume24h::tag)) : "NULL") << ", "
+                    << (messages.isSetField(DeribitMarkPrice::tag) ? to_string(field<price_t>::get(messages,DeribitMarkPrice::tag)) : "NULL") << ", "
+                    << (messages.isSetField(FIELD::OpenInterest) ? to_string(field<price_t>::get(messages, FIELD::OpenInterest)) : "NULL") << ", "
+                    << (messages.isSetField(CurrentFunding::tag) ? to_string(field<price_t>::get(messages,CurrentFunding::tag)) : "NULL") << ", "
+                    << (messages.isSetField(Funding8h::tag) ? to_string(field<price_t>::get(messages,Funding8h::tag)) : "NULL") << ", "
+
+                    << to_string(field<optional<int>>::get(group, FIELD::MDEntryType)) << ", "
+                    << to_string(field<optional<int>>::get(group, FIELD::MDUpdateAction)) << ", "
+                    << to_string(field<optional<price_t>>::get(group, FIELD::MDEntryPx)) << ", "
+                    << to_string(field<optional<volume_t>>::get(group, FIELD::MDEntrySize)) << ", "
+                    << "'" << to_string(field<optional<ptime>>::get(group, FIELD::MDEntryDate)) << "', "
+                    << (group.isSetField(DeribitTradeId::tag) ? "'" + field<string>::get(group, DeribitTradeId::tag) + "'" : "NULL") <<  ", "
+                    << (group.isSetField(FIELD::Side) ? "'" + to_string(field<string>::get(group, FIELD::Side)) +  "'" : "NULL") << ", "
+                    << to_string(field<price_t>::get(group, FIELD::Price)) << ", "
+                    << "'" << field<string>::get(group, FIELD::Text) << "', "
+                    << "'" << field<string>::get(group, FIELD::OrderID) << "', "
+                    << "'" << field<string>::get(group, FIELD::SecondaryOrderID) << "', "
+                    << (group.isSetField(FIELD::OrdStatus) ? "'" + to_string(field<string>::get(group, FIELD::OrdStatus)) + "'" : "NULL") << ", "
+                    << (group.isSetField(DeribitLabel::tag) ? "'" + to_string(field<string>::get(group, DeribitLabel::tag)) + "'" : "NULL") << ", "
+                    << (group.isSetField(DeribitLiquidation::tag) ? "'" + field<string>::get(group, DeribitLiquidation::tag) + "'" : "NULL") << ", "
+                    << (group.isSetField(FIELD::TrdMatchID) ? "'" + field<string>::get(group, FIELD::TrdMatchID) + "'" : "NULL")
+                    << ((i == level_depth - 1) ? ")" : "), ")
+                ;
+    }
+
+    if (!go) return;
+//    std::cout << queryString.str() << std::endl;
+
+    FIX::MySQLQuery query( queryString.str() );
+    pConnection->execute(query);
 }
 
 }  // namespace FIX

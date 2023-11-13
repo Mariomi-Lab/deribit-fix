@@ -8,11 +8,11 @@ project(Deribit)
 file(GLOB PROJECT_SOURCES "*.cpp")
 file(GLOB PROJECT_HEADERS "*.h")
 
-add_executable(${PROJECT_NAME} ${PROJECT_SOURCES} ${PROJECT_HEADERS})
+add_executable(${PROJECT_NAME} ${PROJECT_SOURCES} ${PROJECT_HEADERS}
+        quickfix/DeribitMessageCracker.h)
 
 # Linking quickfix
 find_package(Quickfix REQUIRED)
-
 target_link_libraries(${PROJECT_NAME} ${quickfix_LIBRARY})
 TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE ${quickfix_INCLUDE_DIRS})
 
@@ -25,6 +25,12 @@ endif()
 find_package(Boost REQUIRED COMPONENTS date_time)
 TARGET_LINK_LIBRARIES(${PROJECT_NAME} ${Boost_LIBRARIES})
 TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE ${Boost_INCLUDE_DIRS})
+
+# linking mysql
+add_definitions(-DHAVE_MYSQL)
+find_package(MySQL REQUIRED)
+TARGET_LINK_LIBRARIES(${PROJECT_NAME} ${MYSQL_LIBRARY})
+TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE ${MYSQL_INCLUDE_DIR})
 
 # Linking openssl
 find_package(OpenSSL REQUIRED)

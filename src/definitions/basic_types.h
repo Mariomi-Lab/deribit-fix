@@ -41,9 +41,9 @@ struct BBO_t {
 
 // Enumerations
 enum class side_t { BUY = 1, SELL = 2 };
-enum class option_type_t { CALL = 1, PUT = 0 };
+enum class option_type_t { PUT = 0, CALL = 1 };
 // TODO: Change the option_type_t enumeration back to production values
-// Production is Call = 0 Put = 1. In test is the other way around
+// Production is Call = 1 Put = 0. In test is the other way around
 enum class order_status_t {
   NEW = 0,
   PARTIAL = 1,

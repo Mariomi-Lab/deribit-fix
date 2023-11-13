@@ -349,7 +349,7 @@ void gamma_scalper::on_message(market_update_t const &update) {
 
   BBO_t target_bbo;
   for (auto const &update_component : update.updates) {
-    if (update_component.side == market_side_t::BID) {
+    if (update_component.type == market_type_t::BID) {
       target_bbo.bid_volume = update_component.level_volume;
       target_bbo.bid = update_component.level_price;
     } else {
@@ -391,7 +391,7 @@ void gamma_scalper::print_report() {
   std::cout << "+----------- Instruments to use -----------+" << std::endl;
   std::cout << "Straddle call: " << m_straddle_call << std::endl;
   std::cout << "Straddle put : " << m_straddle_put << std::endl;
-  std::cout << "fufure       : " << m_future << std::endl;
+  std::cout << "future       : " << m_future << std::endl;
   std::cout << "+--------- Straddle's strike price --------+" << std::endl;
   std::cout << to_string(m_straddle_call->strike_price) << std::endl;
   std::cout << "+--------------- Active order -------------+" << std::endl;

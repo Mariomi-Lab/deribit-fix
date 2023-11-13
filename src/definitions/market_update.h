@@ -4,22 +4,31 @@
 #include "to_string.h"
 
 // Enumerations required
-enum class market_side_t { BID = 0, ASK = 1 };
+enum class market_type_t { BID = 0, ASK = 1, TRADE = 2, INDEX = 3, SETTL_INDEX = 6};
 enum class market_update_action_t { NEW = 0, CHANGE = 1, DELETE = 2 };
 
 // to_string market_side_t
 template <>
-inline string to_string(market_side_t const &object) {
+inline string to_string(market_type_t const &object) {
   switch (object) {
-    case market_side_t::ASK:
+    case market_type_t::ASK:
       return "ASK";
       break;
-    case market_side_t::BID:
+    case market_type_t::BID:
       return "BID";
       break;
+      case market_type_t::TRADE:
+          return "TRADE";
+          break;
+      case market_type_t::INDEX:
+          return "INDEX";
+          break;
+      case market_type_t::SETTL_INDEX:
+          return "SETTL_INDEX";
+          break;
   }
   BOOST_THROW_EXCEPTION(std::runtime_error(
-      "to_string: Enumeration market_side_t has a wrong value"));
+      "to_string: Enumeration market_type_t has a wrong value"));
 }
 
 // to_string market_update_action_t
@@ -42,9 +51,11 @@ inline string to_string(market_update_action_t const &object) {
 
 struct market_update_level_t {
   market_update_action_t update_type;
-  market_side_t side;
+    market_type_t type;
+    side_t side;
   volume_t level_volume;
   price_t level_price;
+  optional<ptime> entryDate;
 };
 
 struct market_update_t {
@@ -58,13 +69,14 @@ struct market_update_t {
 
   friend std::ostream &operator<<(std::ostream &os,
                                   market_update_t const &update) {
-    os << "Market update for : " << update.symbol << std::endl;
+    os << update.symbol << " : " ;
     for (auto const &update_level : update.updates) {
-      os << to_string(update_level.side) << " - "
-         << "#" << update_level.level_volume << " " << update_level.level_price
-         << " [" << to_string(update_level.update_type) << "]" << std::endl;
+      os << to_string(update_level.entryDate) << " "
+         << to_string(update_level.type) << " "
+         << to_string(update_level.side) << " - "
+         << update_level.level_price << " " << "#" << update_level.level_volume
+         << " [" << to_string(update_level.update_type) << "]\t";
     }
-
     return os;
   }
 };

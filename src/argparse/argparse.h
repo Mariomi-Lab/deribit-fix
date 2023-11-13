@@ -120,7 +120,7 @@ class ArgumentParser {
   // Argument
   // --------------------------------------------------------------------------
   static String delimit(const String& name) {
-    return String(min(name.size(), static_cast<size_t>(2)), '-').append(name);
+    return String(std::min(name.size(), static_cast<size_t>(2)), '-').append(name);
   }
   static String strip(const String& name) {
     size_t begin = 0;
@@ -174,7 +174,7 @@ class ArgumentParser {
       if (named && optional) s << "[";
       if (named) s << canonicalName();
       if (fixed) {
-        size_t N = min(static_cast<size_t>(3), fixed_nargs);
+        size_t N = std::min(static_cast<size_t>(3), fixed_nargs);
         for (size_t n = 0; n < N; ++n) s << " " << uname;
         if (N < fixed_nargs) s << " ...";
       }

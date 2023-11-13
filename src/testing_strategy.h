@@ -14,7 +14,8 @@ class testing_strategy : public FIX::quickfix_user {
 
   /** Run the strategy */
   bool run();
-
+    void on_logon() override;
+  void on_message(optional<instruments_list_t> const& /*instruments*/) override;
  private:
   // Configuration file
   config_file_t &m_configuration;

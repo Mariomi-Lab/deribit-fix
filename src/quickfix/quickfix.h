@@ -9,9 +9,12 @@
 #include <quickfix/Application.h>
 #include <quickfix/Field.h>
 #include <quickfix/MessageCracker.h>
+//#include <DeribitMessageCracker.h>
 
 #include <quickfix/FileLog.h>
 #include <quickfix/FileStore.h>
+//#include <quickfix/MySQLLog.h>
+//#include <quickfix/MySQLStore.h>
 #include <quickfix/SessionSettings.h>
 #include <quickfix/SocketInitiator.h>
 
@@ -27,9 +30,12 @@ USER_DEFINE_QTY(TradeVolume24h, 100087);
 USER_DEFINE_INT(DeribitLiquidationPrice, 100088);
 USER_DEFINE_STRING(DeribitBTCSize, 100089);
 USER_DEFINE_PRICE(DeribitMarkPrice, 100090);
-USER_DEFINE_PRICE(DeribitOpenInterest, 100091);
+USER_DEFINE_PRICE(DeribitLiquidation, 100091);
+USER_DEFINE_PRICE(CurrentFunding, 100092);
+USER_DEFINE_PRICE(Funding8h, 100093);
 
 class quickfix : public Application, public FIX44::MessageCracker {
+//    class quickfix : public Application, public DeribitMessageCracker {
  public:
   /** Destructor */
   ~quickfix();
@@ -62,6 +68,7 @@ class quickfix : public Application, public FIX44::MessageCracker {
   void request_positions();
   void request_mass_status();
   void request_market_data(string const &symbol);
+        void request_trade_data(string const &symbol);
   string send_ioc_order(string const &symbol, side_t side, price_t order_price,
                         volume_t order_volume);
   string send_gtc_order(string const &symbol, side_t side, price_t order_price,
@@ -72,11 +79,13 @@ class quickfix : public Application, public FIX44::MessageCracker {
   void send_mass_cancellation_order();
   void user_request();
 
- private:
+// private:
   // Create a logon message
   void create_logon_message(Message &message);
 
   // OnMessage for all messages. This comes from the message cracker inheritance
+//  virtual void onMessage(const FIX44::Message& message, const SessionID& sessionID) override;
+
   virtual void onMessage(FIX44::PositionReport const &message,
                          SessionID const &session_id) override;
   virtual void onMessage(FIX44::SecurityList const &message,
@@ -93,10 +102,13 @@ class quickfix : public Application, public FIX44::MessageCracker {
                          SessionID const &session_id) override;
   virtual void onMessage(FIX44::OrderMassCancelReport const &message,
                          SessionID const &session_id) override;
+        virtual void onMessage(FIX44::TradeCaptureReportRequestAck const &message,
+                               SessionID const &session_id) override {}
 
   // Encapsulates the sending of messages
   void send_message(Message &message, SessionID const &session);
 
+private:
   // Session identifier
   SessionID m_session_id;
 
@@ -117,9 +129,11 @@ class quickfix : public Application, public FIX44::MessageCracker {
   std::unique_ptr<FIX::SessionSettings> m_quickfix_settings;
   std::unique_ptr<FIX::SynchronizedApplication> m_quickfix_synch;
   std::unique_ptr<FIX::FileStoreFactory> m_quickfix_store_factory;
-  std::unique_ptr<FIX::FileLogFactory> m_quickfix_log_factory;
+//  std::unique_ptr<FIX::MySQLStoreFactory> m_quickfix_store_factory;
+    std::unique_ptr<FIX::FileLogFactory> m_quickfix_log_factory;
+//    std::unique_ptr<FIX::MySQLLogFactory> m_quickfix_log_factory;
 
-  // Flag to know if this will be used to replaying logs or not
+    // Flag to know if this will be used to replaying logs or not
   bool m_log_replay;
 };
 

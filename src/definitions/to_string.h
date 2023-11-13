@@ -72,7 +72,7 @@ inline string to_string(currency const& object) {
 // ptime
 template <>
 inline string to_string(ptime const& object) {
-  return to_iso_string(object);
+  return to_iso_extended_string(object);
 }
 
 // order_status_t
@@ -165,5 +165,5 @@ inline string to_string(optional<T> const& object) {
   if (object) {
     return to_string(*object);
   }
-  return "Empty";
+  return "NULL";
 }

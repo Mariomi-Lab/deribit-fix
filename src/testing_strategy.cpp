@@ -1,6 +1,10 @@
 #include "testing_strategy.h"
+#include <quickfix/MySQLConnection.h>
+void persist(optional<instruments_list_t> const&);
 
-std::string TEST_OPTION = "BTC-29MAR19-3500-C";
+std::string TEST_OPTION = "BTC-27OCT23-28000-C";
+
+optional<instruments_list_t> instruments;
 
 testing_strategy::testing_strategy(config_file_t &configuration)
     : m_configuration(configuration),
@@ -32,6 +36,8 @@ bool testing_strategy::run() {
   menu << "#     7 - User request                    #" << std::endl;
   menu << "#     8 - Mass status request             #" << std::endl;
   menu << "#     10 - Request positions list         #" << std::endl;
+  menu << "#     11 - Request trade captures         #" << std::endl;
+  menu << "#     12 - BTC-PERP/ETH-PERP market data  #" << std::endl;
   menu << "#-----------------------------------------#" << std::endl;
   menu << "#     0 - Quit                            #" << std::endl;
   menu << "###########################################" << std::endl;
@@ -50,6 +56,21 @@ bool testing_strategy::run() {
         break;
       }
       case 3: {
+          if (!instruments) {
+              m_market->request_trade_data(TEST_OPTION);
+          } else {
+              boost::gregorian::date dateToCompare(2023, 10, 27);
+
+              for (const instrument_t& instrument : *instruments) {
+
+                  if (instrument.maturity_date && instrument.maturity_date->date() != dateToCompare) continue;
+                  if (instrument.strike_price && *(instrument.strike_price) > 30000) continue;
+                  if ((to_string(instrument.main_currency) != "BTC")) continue;
+                  if (instrument.type == "INDEX" ) continue;
+
+                  m_market->request_market_data(instrument.symbol);
+              }
+          }
         m_market->request_market_data(TEST_OPTION);
         break;
       }
@@ -76,10 +97,35 @@ bool testing_strategy::run() {
         m_market->request_mass_status();
         break;
       }
-      case 10: {
-        m_market->request_positions();
-        break;
-      }
+        case 10: {
+            m_market->request_positions();
+            break;
+        }
+        case 11: {
+            if (!instruments) {
+//                m_market->request_trade_data(TEST_OPTION);
+                m_market->request_trade_data("BTC-PERPETUAL");
+                m_market->request_trade_data("ETH-PERPETUAL");
+            } else {
+                boost::gregorian::date dateToCompare(2023, 10, 27);
+
+                for (const instrument_t& instrument : *instruments) {
+
+                    if (instrument.maturity_date && instrument.maturity_date->date() != dateToCompare) continue;
+                    if (instrument.strike_price && *(instrument.strike_price) > 30000) continue;
+                    if ((to_string(instrument.main_currency) != "BTC")) continue;
+                    if (instrument.type == "INDEX" ) continue;
+
+                    m_market->request_trade_data(instrument.symbol);
+                }
+            }
+            break;
+        }
+        case 12: {
+            m_market->request_market_data("BTC-PERPETUAL");
+            m_market->request_market_data("ETH-PERPETUAL");
+            break;
+        }
       default: {
         std::cout << "Option " << choice << " is not available" << std::endl;
       }
@@ -88,4 +134,15 @@ bool testing_strategy::run() {
     std::cin >> choice;
   }
   return false;
+}
+
+void testing_strategy::on_message(optional<instruments_list_t> const& i) {
+    instruments = i;
+//    persist(i);
+}
+
+void testing_strategy::on_logon() {
+    std::cout << "on_logon" << std::endl;
+    m_market->request_market_data("BTC-PERPETUAL");
+    m_market->request_market_data("ETH-PERPETUAL");
 }
